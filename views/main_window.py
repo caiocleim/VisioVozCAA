@@ -10,6 +10,9 @@ from PyQt6.QtWidgets import (
 
 from views.widgets import SelectableCardWidget
 from views.modals import WebcamInfoModal, CalibrationModal
+from models.data import (
+    CATEGORY_CARD_COUNT, RESPONSE_CARDS, CAREGIVER_INDEX, EMERGENCY_INDEX, TOTAL_ITEMS
+)
 
 
 class CAAOcularMainWindow(QMainWindow):
@@ -329,20 +332,26 @@ class CAAOcularMainWindow(QMainWindow):
         self.cards_grid_layout = QGridLayout()
         self.cards_grid_layout.setSpacing(14)
         self.card_widgets = []
-        for i in range(6):
+        for i in range(CATEGORY_CARD_COUNT + len(RESPONSE_CARDS)):
             card_w = SelectableCardWidget(index=i, is_action_button=False)
-            self.cards_grid_layout.addWidget(card_w, i // 3, i % 3)
+            self.cards_grid_layout.addWidget(card_w, i // 4, i % 4)
             self.card_widgets.append(card_w)
         main_layout.addLayout(self.cards_grid_layout, stretch=1)
 
         actions_row = QHBoxLayout()
         actions_row.setSpacing(14)
-        self.btn_caregiver = SelectableCardWidget(index=6, is_action_button=True, is_emergency=False)
-        self.btn_caregiver.set_content("🔔 CHAMAR CUIDADOR", "Solicitar presença no quarto (Opção 7)")
+        self.btn_caregiver = SelectableCardWidget(index=CAREGIVER_INDEX, is_action_button=True, is_emergency=False)
+        self.btn_caregiver.set_content(
+            "🔔 CHAMAR CUIDADOR",
+            f"Solicitar presença no quarto (Opção {CAREGIVER_INDEX + 1})"
+        )
         self.btn_caregiver.setFixedHeight(96)
 
-        self.btn_emergency = SelectableCardWidget(index=7, is_action_button=True, is_emergency=True)
-        self.btn_emergency.set_content("🚨 ALERTA DE EMERGÊNCIA", "Acionar socorro imediato (Opção 8)")
+        self.btn_emergency = SelectableCardWidget(index=EMERGENCY_INDEX, is_action_button=True, is_emergency=True)
+        self.btn_emergency.set_content(
+            "🚨 ALERTA DE EMERGÊNCIA",
+            f"Acionar socorro imediato (Opção {EMERGENCY_INDEX + 1})"
+        )
         self.btn_emergency.setFixedHeight(96)
 
         actions_row.addWidget(self.btn_caregiver)
@@ -355,7 +364,7 @@ class CAAOcularMainWindow(QMainWindow):
         f_layout = QHBoxLayout(footer_bar)
         f_layout.setContentsMargins(14, 8, 14, 8)
         shortcuts_lbl = QLabel(
-            "Olhar Esquerda/Direita: Mudar Aba  |  Piscar Dir [E]: Próxima Opção (0→7)  |  "
+            f"Olhar Esquerda/Direita: Mudar Aba  |  Piscar Dir [E]: Próxima Opção (0→{TOTAL_ITEMS - 1})  |  "
             "Piscar Esq [Q]: Opção Anterior  |  Piscar 2 Olhos [Espaço]: Selecionar"
         )
         shortcuts_lbl.setStyleSheet("color: #cbd5e1; font-size: 11px; font-weight: 600;")

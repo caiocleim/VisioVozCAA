@@ -38,4 +38,12 @@ CATEGORIES = [
     }
 ]
 
-TOTAL_ITEMS = 8  # 0..5 (Cartões), 6 (Cuidador), 7 (Emergência)
+RESPONSE_CARDS = [
+    {"title": "Sim", "speech": "Sim."},
+    {"title": "Não", "speech": "Não."}
+]
+
+CATEGORY_CARD_COUNT = len(CATEGORIES[0]["cards"])
+CAREGIVER_INDEX = CATEGORY_CARD_COUNT + len(RESPONSE_CARDS)
+EMERGENCY_INDEX = CAREGIVER_INDEX + 1
+TOTAL_ITEMS = EMERGENCY_INDEX + 1

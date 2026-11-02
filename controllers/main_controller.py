@@ -2,7 +2,10 @@ import time
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QKeyEvent
 
-from models.data import CATEGORIES, TOTAL_ITEMS
+from models.data import (
+    CATEGORIES, RESPONSE_CARDS, CATEGORY_CARD_COUNT,
+    CAREGIVER_INDEX, EMERGENCY_INDEX, TOTAL_ITEMS
+)
 from models.services import AssistiveServices
 from models.telemetry import TelemetryLogger
 from models.tracker import EyeTrackerEngine
@@ -111,7 +114,8 @@ class MainController:
                 """)
 
         cards_data = CATEGORIES[self.current_category_index]["cards"]
-        for idx, card_info in enumerate(cards_data):
+        visible_cards = cards_data + RESPONSE_CARDS
+        for idx, card_info in enumerate(visible_cards):
             self.view.card_widgets[idx].set_content(card_info["title"])
 
         for idx, widget in enumerate(self.view.card_widgets):
@@ -120,10 +124,16 @@ class MainController:
         titles = [
             f"Cartão #{i + 1} ({c['title'].replace(chr(10), ' ')})"
             for i, c in enumerate(cards_data)
-        ] + ["Opção 7: CHAMAR CUIDADOR", "Opção 8: ALERTA DE EMERGÊNCIA"]
-
+        ] + [
+            f"Cartão {card['title']}" for card in RESPONSE_CARDS
+        ] + [
+            f"Opção {CAREGIVER_INDEX + 1}: CHAMAR CUIDADOR",
+            f"Opção {EMERGENCY_INDEX + 1}: ALERTA DE EMERGÊNCIA"
+        ]
         self.view.focus_title_lbl.setText(f"Foco Atual: {titles[self.current_focus_index]}")
-        self.view.focus_item_counter.setText(f"Opção Atual: {self.current_focus_index + 1} / 8")
+        self.view.focus_item_counter.setText(
+            f"Opção Atual: {self.current_focus_index + 1} / {TOTAL_ITEMS}"
+        )
 
     def set_focus(self, new_index: int, play_sound: bool = True, move_mouse: bool = True):
         """Método unificado para mudar a opção focada e disparar feedback auditivo."""
@@ -179,7 +189,7 @@ class MainController:
     def execute_item(self, index: int):
         self.services.play_select_sound()
 
-        if 0 <= index <= 5:
+        if 0 <= index < CATEGORY_CARD_COUNT:
             card = CATEGORIES[self.current_category_index]["cards"][index]
             title_clean = card["title"].replace("\n", " ")
             speech_msg = card["speech"]
@@ -187,18 +197,28 @@ class MainController:
             self.services.send_local_notification("COMUNICACAO_CARTAO", title_clean, speech_msg)
             self.view.feedback_action_text.setText(f'Status do Comando: "{title_clean}" — {speech_msg}')
             target_name = title_clean
-        elif index == 6:
+        elif CATEGORY_CARD_COUNT <= index < CAREGIVER_INDEX:
+            card = RESPONSE_CARDS[index - CATEGORY_CARD_COUNT]
+            title_clean = card["title"]
+            speech_msg = card["speech"]
+            self.services.speak(speech_msg, is_emergency=False)
+            self.services.send_local_notification("COMUNICACAO_CARTAO", title_clean, speech_msg)
+            self.view.feedback_action_text.setText(f'Status do Comando: "{title_clean}"')
+            target_name = title_clean.upper()
+        elif index == CAREGIVER_INDEX:
             msg = "Atenção cuidador! O paciente está chamando no quarto!"
             self.services.speak(msg, is_emergency=False)
             self.services.send_local_notification("CHAMAR_CUIDADOR", "CHAMAR CUIDADOR", msg)
             self.view.feedback_action_text.setText("Status do Comando: 🔔 CHAMAR CUIDADOR ACIONADO!")
             target_name = "CHAMAR_CUIDADOR"
-        else:
+        elif index == EMERGENCY_INDEX:
             msg = "Alerta de emergência! O paciente precisa de socorro imediato!"
             self.services.speak(msg, is_emergency=True)
             self.services.send_local_notification("ALERTA_EMERGENCIA", "ALERTA DE EMERGÊNCIA", msg)
             self.view.feedback_action_text.setText("Status do Comando: 🚨 ALERTA DE EMERGÊNCIA ACIONADO!")
             target_name = "ALERTA_EMERGENCIA"
+        else:
+            return
 
         self.logger.log_event(
             self.tracking_mode, "SELECAO_DWELL_TIME", target_name,

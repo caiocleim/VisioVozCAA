@@ -1,10 +1,19 @@
-# -*- coding: utf-8 -*-
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QFrame, QTableWidget,
     QTableWidgetItem, QHeaderView
+)
+
+import time
+import numpy as np
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import (
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QLabel, QPushButton, QFrame, QTableWidget,
+    QTableWidgetItem, QHeaderView, QProgressBar
 )
 
 
@@ -92,7 +101,7 @@ class WebcamInfoModal(QDialog):
                 item.setText(val)
 
 
-class CalibrationModal(QDialog):
+
     calibration_finished = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -183,3 +192,149 @@ class CalibrationModal(QDialog):
         for i, btn in enumerate(self.point_buttons):
             btn.setVisible(i == self.calib_step)
         self.progress_lbl.setText(f"Progresso: {self.calib_step} / 5 pontos")
+
+
+class CalibrationModal(QDialog):
+    # Emite: (left_ratios, right_ratios, center_ratios, ear_samples)
+    calibration_finished = pyqtSignal(list, list, list, list)
+
+    def __init__(self, tracker_engine, parent=None):
+        super().__init__(parent)
+        self.tracker = tracker_engine
+        self.setWindowTitle("Calibração Ocular Assistiva")
+        self.setModal(True)
+        self.resize(920, 640)
+        self.setStyleSheet("QDialog { background-color: #020617; color: #ffffff; }")
+
+        self.calib_step = 0
+        self.hold_seconds = 2.0
+        self.step_start_time = time.perf_counter()
+
+        # Armazenamento de medições por ponto
+        self.samples_per_step = {0: [], 1: [], 2: [], 3: [], 4: []}
+
+        # Ordem dos pontos: 0: Centro, 1: Canto Superior Esq, 2: Canto Superior Dir, 3: Inf Esq, 4: Inf Dir
+        self.point_labels = [
+            "1. Olhe fixamente para o CENTRO",
+            "2. Olhe fixamente para o CANTO SUPERIOR ESQUERDO",
+            "3. Olhe fixamente para o CANTO SUPERIOR DIREITO",
+            "4. Olhe fixamente para o CANTO INFERIOR ESQUERDO",
+            "5. Olhe fixamente para o CANTO INFERIOR DIREITO"
+        ]
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(28, 24, 28, 24)
+
+        badge = QLabel("CALIBRAÇÃO BIOMÉTRICA OCULAR")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet("""
+            background-color: rgba(245, 158, 11, 0.2);
+            color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.4);
+            border-radius: 10px; padding: 4px 12px; font-weight: bold; font-size: 11px;
+        """)
+        main_layout.addWidget(badge, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.instruction_lbl = QLabel(self.point_labels[0])
+        self.instruction_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.instruction_lbl.setStyleSheet("font-size: 20px; font-weight: 800; color: #ffffff; margin-top: 6px;")
+        main_layout.addWidget(self.instruction_lbl)
+
+        self.canvas_frame = QFrame()
+        self.canvas_frame.setStyleSheet("""
+            QFrame { background-color: #0f172a; border: 1px solid #1e293b; border-radius: 16px; }
+        """)
+        grid = QGridLayout(self.canvas_frame)
+        grid.setContentsMargins(32, 32, 32, 32)
+
+        self.point_buttons = []
+        positions = [(1, 1), (0, 0), (0, 2), (2, 0), (2, 2)]
+        for i, (r, c) in enumerate(positions):
+            btn = QPushButton(str(i + 1))
+            btn.setFixedSize(60, 60)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #facc15; color: #020617;
+                    border-radius: 30px; font-size: 18px; font-weight: 900;
+                    border: 3px solid #fef08a;
+                }
+            """)
+            grid.addWidget(btn, r, c)
+            self.point_buttons.append(btn)
+
+        main_layout.addWidget(self.canvas_frame, stretch=1)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar { background-color: #1e293b; border-radius: 4px; }
+            QProgressBar::chunk { background-color: #10b981; border-radius: 4px; }
+        """)
+        main_layout.addWidget(self.progress_bar)
+
+        footer = QHBoxLayout()
+        self.progress_lbl = QLabel("Ponto 1 de 5")
+        self.progress_lbl.setStyleSheet("color: #cbd5e1; font-family: Consolas, monospace; font-size: 13px;")
+        cancel_btn = QPushButton("Cancelar")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b; color: #cbd5e1;
+                padding: 8px 16px; border-radius: 8px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #334155; }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+
+        footer.addStretch()
+        footer.addWidget(self.progress_lbl)
+        footer.addSpacing(16)
+        footer.addWidget(cancel_btn)
+        footer.addStretch()
+        main_layout.addLayout(footer)
+
+        self.update_step_ui()
+
+        # Temporizador a 30 FPS para leitura dos dados durante a calibração
+        self.calib_timer = QTimer(self)
+        self.calib_timer.timeout.connect(self._calibration_tick)
+        self.calib_timer.start(33)
+
+    def update_step_ui(self):
+        for i, btn in enumerate(self.point_buttons):
+            btn.setVisible(i == self.calib_step)
+        if self.calib_step < len(self.point_labels):
+            self.instruction_lbl.setText(self.point_labels[self.calib_step])
+            self.progress_lbl.setText(f"Ponto {self.calib_step + 1} de 5")
+
+    def _calibration_tick(self):
+        now = time.perf_counter()
+        elapsed = now - self.step_start_time
+        pct = int(min(100, (elapsed / self.hold_seconds) * 100))
+        self.progress_bar.setValue(pct)
+
+        # Recolhe os rácios da câmara processados pelo tracker
+        if self.tracker and hasattr(self.tracker, 'last_gaze_ratio'):
+            self.samples_per_step[self.calib_step].append((self.tracker.last_gaze_ratio, self.tracker.last_ear))
+
+        if elapsed >= self.hold_seconds:
+            self.calib_step += 1
+            self.step_start_time = time.perf_counter()
+
+            if self.calib_step >= 5:
+                self.calib_timer.stop()
+                self._finish_and_emit()
+            else:
+                self.update_step_ui()
+
+    def _finish_and_emit(self):
+        # Separa amostras de centro, esquerda e direita
+        center_samples = [s[0] for s in self.samples_per_step[0]]
+        left_samples = [s[0] for s in self.samples_per_step[1] + self.samples_per_step[3]]
+        right_samples = [s[0] for s in self.samples_per_step[2] + self.samples_per_step[4]]
+
+        all_ears = [s[1] for step in self.samples_per_step.values() for s in step]
+
+        self.calibration_finished.emit(left_samples, right_samples, center_samples, all_ears)
+        self.accept()

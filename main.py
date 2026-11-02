@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 import sys
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QFont

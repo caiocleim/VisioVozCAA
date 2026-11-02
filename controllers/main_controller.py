@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import time
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QKeyEvent
@@ -352,15 +351,26 @@ class MainController:
                 self.execute_item(selected)
 
     def open_calibration_modal(self):
-        modal = CalibrationModal(self.view)
+        # Passa a instância do tracker para o modal recolher os rácios
+        modal = CalibrationModal(self.tracker, self.view)
         modal.calibration_finished.connect(self._on_calibration_completed)
         modal.exec()
 
-    def _on_calibration_completed(self):
-        self.view.feedback_action_text.setText("Status do Comando: Calibração ocular de 5 pontos concluída!")
-        self.services.speak("Calibração concluída com sucesso!")
+    def _on_calibration_completed(self, left_ratios, right_ratios, center_ratios, ear_samples):
+        # 1. Regula os parâmetros do motor matemático
+        self.tracker.apply_calibration(left_ratios, right_ratios, center_ratios, ear_samples)
+
+        # 2. Atualiza o limiar de fecho dos olhos do próprio controlador
+        self.EAR_THRESHOLD = self.tracker.calibrated_ear_threshold
+
+        # 3. Notifica a View e o utilizador
+        self.view.feedback_action_text.setText(
+            f"Status do Comando: Calibração Concluída! Limiar EAR ajustado para {self.EAR_THRESHOLD:.2f}."
+        )
+        self.services.speak("Calibração ocular concluída com sucesso e parâmetros atualizados!")
+
         self.logger.log_event(
-            self.tracking_mode, "CALIBRACAO_5_PONTOS_CONCLUIDA", "CALIBRACAO",
+            self.tracking_mode, "CALIBRACAO_5_PONTOS_CONCLUIDA", "CALIBRACAO_APLICADA",
             self.ear_left_val, self.ear_right_val, self.current_gaze_direction,
             self.tracker.telemetry["luminosity"], self.tracker.telemetry["qualityRating"], self.tracker.telemetry["fps"]
         )

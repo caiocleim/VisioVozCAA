@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import cv2
 import numpy as np
 
@@ -53,6 +52,28 @@ class EyeTrackerEngine:
             "saturation": 1.25
         }
         self.current_rgb_frame = None
+
+        # Dados para calibração dinâmica
+        self.last_gaze_ratio = 0.50
+        self.last_ear = 0.29
+        self.calibrated = False
+        self.gaze_center_ratio = 0.50
+        self.gaze_left_ratio = 0.62
+        self.gaze_right_ratio = 0.38
+        self.ear_open_baseline = 0.29
+        self.calibrated_ear_threshold = 0.205
+
+    def apply_calibration(self, left_ratios: list, right_ratios: list, center_ratios: list, ear_samples: list):
+        if left_ratios:
+            self.gaze_left_ratio = float(np.mean(left_ratios))
+        if right_ratios:
+            self.gaze_right_ratio = float(np.mean(right_ratios))
+        if center_ratios:
+            self.gaze_center_ratio = float(np.mean(center_ratios))
+        if ear_samples:
+            self.ear_open_baseline = float(np.mean(ear_samples))
+            self.calibrated_ear_threshold = max(0.12, min(0.28, self.ear_open_baseline * 0.72))
+        self.calibrated = True
 
     def start_camera(self) -> bool:
         if not MP_AVAILABLE:
@@ -136,10 +157,33 @@ class EyeTrackerEngine:
             ratio_l = (iris_l.x - min(c_l_in.x, c_l_out.x)) / max(1e-6, abs(c_l_in.x - c_l_out.x))
 
             avg_gaze_ratio = (ratio_r + ratio_l) / 2.0
-            if avg_gaze_ratio < 0.38:
-                detected_dir = "RIGHT"
-            elif avg_gaze_ratio > 0.62:
-                detected_dir = "LEFT"
+            self.last_gaze_ratio = avg_gaze_ratio
+            self.last_ear = (ear_l + ear_r) / 2.0
+
+            if self.calibrated:
+                if self.gaze_left_ratio > self.gaze_center_ratio:
+                    thresh_left = self.gaze_center_ratio + (self.gaze_left_ratio - self.gaze_center_ratio) * 0.35
+                    thresh_right = self.gaze_center_ratio - (self.gaze_center_ratio - self.gaze_right_ratio) * 0.35
+                    if avg_gaze_ratio > thresh_left:
+                        detected_dir = "LEFT"
+                    elif avg_gaze_ratio < thresh_right:
+                        detected_dir = "RIGHT"
+                    else:
+                        detected_dir = "CENTER"
+                else:
+                    thresh_left = self.gaze_center_ratio - (self.gaze_center_ratio - self.gaze_left_ratio) * 0.35
+                    thresh_right = self.gaze_center_ratio + (self.gaze_right_ratio - self.gaze_center_ratio) * 0.35
+                    if avg_gaze_ratio < thresh_left:
+                        detected_dir = "LEFT"
+                    elif avg_gaze_ratio > thresh_right:
+                        detected_dir = "RIGHT"
+                    else:
+                        detected_dir = "CENTER"
+            else:
+                if avg_gaze_ratio < 0.38:
+                    detected_dir = "RIGHT"
+                elif avg_gaze_ratio > 0.62:
+                    detected_dir = "LEFT"
 
         return True, mirrored_bgr, ear_l, ear_r, detected_dir, True
 
